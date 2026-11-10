@@ -23,7 +23,7 @@ sequenceDiagram
     W->>D: process.id()
     D-->>W: ID to save for later
 
-    Note over W,D: Request A ends; its RPC stub is disposed
+    Note over W,D: Request A ends and its RPC stub is disposed
     Note over G,P: The supervisor map and child remain in the running container
 
     Note over W,D: Request B — reconnect using the saved ID
@@ -41,7 +41,7 @@ sequenceDiagram
         G->>P: Kill the child
         G-->>D: Signal result
         D-->>W: Signal result
-        P-->>G: Wait() returns; retain exit status
+        P-->>G: Wait() returns and the supervisor retains exit status
     end
 ```
 
