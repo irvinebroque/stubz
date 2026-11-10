@@ -4,16 +4,50 @@ A Worker RPC stub does not own a Linux process. Something inside the container
 must start the child, remember it, reap it, retain its exit status, and accept
 later requests to inspect or stop it. This example makes that work visible.
 
-```text
-Worker request A                  Durable Object                  Linux container
-startProcess()  ── Workers RPC ──> Sandbox ── HTTP /processes ──> Go supervisor
-       <──── Process RPC stub ────┘                              map[id] → exec.Cmd
-save the ID; request ends                                        sleep 60
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant D as Durable Object / Process RPC target
+    box Linux container
+        participant G as Go supervisor (customer code)
+        participant P as Child process
+    end
 
-Worker request B
-getProcess(id) ── Workers RPC ──> fresh Process RPC target
-process.status() ───────────────> Sandbox ── HTTP lookup(id) ──> same map, same child
+    Note over W,D: Request A — start a process
+    W->>D: startProcess() over Workers RPC
+    D->>G: POST /processes over HTTP
+    G->>P: Start sleep 60
+    Note over G: Store map[id] → exec.Cmd
+    G-->>D: Application process ID
+    D-->>W: Process RPC stub
+    W->>D: process.id()
+    D-->>W: ID to save for later
+
+    Note over W,D: Request A ends; its RPC stub is disposed
+    Note over G,P: The supervisor map and child remain in the running container
+
+    Note over W,D: Request B — reconnect using the saved ID
+    W->>D: getProcess(id) over Workers RPC
+    D-->>W: Fresh Process RPC stub
+    W->>D: process.status()
+    D->>G: GET /processes/id over HTTP
+    Note over G: Look up the same child in the map
+    G-->>D: PID, running state, exit code
+    D-->>W: Status
+
+    opt Stop the process
+        W->>D: process.stop()
+        D->>G: DELETE /processes/id over HTTP
+        G->>P: Kill the child
+        G-->>D: Signal result
+        D-->>W: Signal result
+        P-->>G: Wait() returns; retain exit status
+    end
 ```
+
+**The customer-built Go supervisor owns the process map.** A fresh RPC stub
+reaches that existing registry; the stub itself does not preserve the process.
+If the container or supervisor restarts, the in-memory registry is lost.
 
 The map in `container/main.go` is the point. The customer writes and ships a
 process service, its protocol, synchronization, child reaping, and lookup logic.
